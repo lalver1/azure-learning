@@ -41,7 +41,7 @@ resource "azurerm_container_app" "app" {
     external_enabled = true
     target_port      = 50505 # match the port your Flask app listens on
     traffic_weight {
-      revision_suffix = "latest"
+      revision_suffix = var.container_tag
       percentage=100
       }
     transport        = "auto"
@@ -50,7 +50,7 @@ resource "azurerm_container_app" "app" {
   template {
     container {
       name   = "flask-app"
-      image  = "ghcr.io/lalver1/azure-learning:latest"
+      image  = "ghcr.io/lalver1/azure-learning:${var.container_tag}"
       cpu    = 0.5
       memory = "1.0Gi"
     
