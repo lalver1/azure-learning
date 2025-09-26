@@ -17,6 +17,9 @@ provider "azurerm" {
   features {}
 }
 
+# Get information about the current Azure client (logged-in identity)
+data "azurerm_client_config" "current" {}
+
 # 1. Resource group
 resource "azurerm_resource_group" "rg" {
   name     = "web-flask-aca-rg"
@@ -78,4 +81,38 @@ resource "azurerm_application_insights" "appi" {
   resource_group_name = azurerm_resource_group.rg.name
   application_type    = "web"
   workspace_id        = azurerm_log_analytics_workspace.law.id
+}
+
+# 6. Key Vault
+resource "azurerm_key_vault" "kv" {
+  name                        = "webflaskkv"
+  location                    = azurerm_resource_group.rg.location
+  resource_group_name         = azurerm_resource_group.rg.name
+  tenant_id                   = data.azurerm_client_config.current.tenant_id
+  sku_name                    = "standard"
+
+  soft_delete_retention_days  = 7
+  purge_protection_enabled    = true
+
+  access_policy {
+    tenant_id = data.azurerm_client_config.current.tenant_id
+    object_id = data.azurerm_client_config.current.object_id
+
+    secret_permissions = [
+      "Get",
+      "List",
+      "Set",
+      "Delete",
+      "Purge",
+      "Recover",
+      "Backup",
+      "Restore"
+    ]
+  }
+}
+
+# 7. Key Vault Secret
+data "azurerm_key_vault_secret" "slack_webhook_url" {
+  name         = "slack-webhook-url"
+  key_vault_id = azurerm_key_vault.kv.id
 }
