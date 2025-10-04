@@ -48,3 +48,11 @@ def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
     except requests.exceptions.RequestException as e:
         logging.error(f"Error sending message to Slack: {e}")
         return func.HttpResponse(f"Error sending to Slack: {e}", status_code=500)
+
+@app.route(route="health", auth_level=func.AuthLevel.ANONYMOUS, methods=["GET"])
+def health_check(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    A simple health check endpoint
+    """
+    logging.info("Health check endpoint was triggered.")
+    return func.HttpResponse("Healthy.", status_code=200)
