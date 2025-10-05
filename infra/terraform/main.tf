@@ -2,7 +2,7 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 3.100"
+      version = "~> 4.0"
     }
   }
   backend "azurerm" {
@@ -86,14 +86,13 @@ resource "azurerm_application_insights" "appi" {
 
 # 6. Key Vault
 resource "azurerm_key_vault" "kv" {
-  name                        = "webflaskkv2"
+  name                        = "webflaskkv4"
   location                    = azurerm_resource_group.rg.location
   resource_group_name         = azurerm_resource_group.rg.name
   tenant_id                   = data.azurerm_client_config.current.tenant_id
   sku_name                    = "standard"
 
   soft_delete_retention_days  = 7
-  purge_protection_enabled    = true
 
   access_policy {
     tenant_id = data.azurerm_client_config.current.tenant_id
@@ -137,7 +136,7 @@ resource "azurerm_storage_container" "funcpack" {
 # 10. Archive the Python Azure Function code
 data "archive_file" "funczip" {
   type        = "zip"
-  source_dir  = "${path.module}/../../azure_functions"   # assumes ./azure_functions has your function code
+  source_dir  = "${path.module}/../../azure_functions"   # assumes ./azure_functions has the function code
   output_path = "${path.module}/../../azure_functions.zip"
 }
 
@@ -171,7 +170,11 @@ resource "azurerm_linux_function_app" "funcapp" {
 
   site_config {
     application_stack {
-      python_version = "3.12"
+      docker{
+        registry_url = "https://ghcr.io"
+        image_name   = "ghcr.io/lalver1/azure-learning"
+        image_tag    = "${var.container_tag}"
+        }
     }
   }
 
@@ -179,12 +182,6 @@ resource "azurerm_linux_function_app" "funcapp" {
     "SLACK_WEBHOOK_URL"        = data.azurerm_key_vault_secret.slack_webhook_url.value
     "AzureWebJobsStorage"      = azurerm_storage_account.funcsa.primary_connection_string
     "FUNCTIONS_WORKER_RUNTIME" = "python"
-
-    # key flag for remote build
-    "SCM_DO_BUILD_DURING_DEPLOYMENT" = "true"
-
-    # run from the package we uploaded
-    "WEBSITE_RUN_FROM_PACKAGE" = azurerm_storage_blob.funczip.url
   }
 
   identity {
@@ -200,7 +197,7 @@ resource "azurerm_monitor_action_group" "func_webhook" {
 
   webhook_receiver {
     name        = "funcapp-webhook"
-    service_uri = "${azurerm_linux_function_app.funcapp.default_hostname}/api/alert_to_slack?code=${data.azurerm_function_app_host_keys.func_keys.default_function_key}"
+    service_uri = "https://${azurerm_linux_function_app.funcapp.default_hostname}/api/alert_to_slack?code=${data.azurerm_function_app_host_keys.func_keys.default_function_key}"
   }
 }
 
