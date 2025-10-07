@@ -1,3 +1,4 @@
+# changedd
 import logging
 import os
 import requests
@@ -7,15 +8,23 @@ import azure.functions as func
 app = func.FunctionApp()
 
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL")
+FUNCTION_KEY = os.environ.get("AZURE_FUNCTION_KEY")
 
 
-@app.route(route="alert_to_slack", auth_level=func.AuthLevel.FUNCTION, methods=["POST"])
+@app.route(route="alert_to_slack", auth_level=func.AuthLevel.ANONYMOUS, methods=["POST"])
 def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
     """
     Receives an alert from Azure Monitor, formats it, and sends it to Slack via webhook.
     """
     logging.info("alert_to_slack processed a request.")
 
+    provided_code = req.params.get("CODE")
+    if not provided_code:
+        return func.HttpResponse("Missing CODE authentication.", status_code=401)
+    if provided_code != FUNCTION_KEY:
+        logging.warning("Invalid CODE provided.")
+        return func.HttpResponse("Unauthorized: invalid CODE.", status_code=403)
+    
     try:
         alert_data = req.get_json()
     except ValueError:
