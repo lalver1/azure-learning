@@ -2,6 +2,7 @@
 import logging
 import os
 import requests
+import json
 
 import azure.functions as func
 
@@ -38,12 +39,69 @@ def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
     fired_date_time = essentials.get("firedDateTime", "N/A")
     investigation_link = essentials.get("investigationLink", "#")
 
+    additional_details = ""
+    alert_context = data.get("alertContext", {})
+    search_results = alert_context.get("SearchResults") if alert_context else None
+
+    # Check if this is a log-based alert with search results
+    if search_results and search_results.get("tables"):
+        tables = search_results["tables"]
+        if tables and tables[0].get("rows"):
+            main_table = tables[0]
+            # Create a map of column names to their index
+            column_map = {col['name']: i for i, col in enumerate(main_table.get("columns", []))}
+            first_row = main_table["rows"][0]  # Process the first result row
+
+            # Helper function to safely get data from the row using the column map
+            def get_field(field_name, default="N/A"):
+                index = column_map.get(field_name)
+                if index is not None and index < len(first_row):
+                    value = first_row[index]
+                    return value if value else default # Return default if value is empty
+                return default
+
+            # Helper function to format JSON strings for readability
+            def format_json_field(raw_json_string):
+                if not raw_json_string or raw_json_string == "N/A":
+                    return "N/A"
+                try:
+                    parsed_json = json.loads(raw_json_string)
+                    return f"```\n{json.dumps(parsed_json, indent=2)}\n```"
+                except (json.JSONDecodeError, TypeError):
+                    return raw_json_string # Return as-is if not valid JSON
+
+            # Extract all required fields
+            problem_id = get_field("problemId")
+            outer_message = get_field("outerMessage")
+            innermost_message = get_field("innermostMessage")
+            client_os = get_field("client_OS")
+            client_city = get_field("client_City")
+            client_browser = get_field("client_Browser")
+           
+            # Format potentially complex fields
+            details = format_json_field(get_field("details"))
+            custom_dimensions = format_json_field(get_field("customDimensions"))
+
+            # Build the additional details string
+            additional_details = (
+                f"*Problem ID*: {problem_id}\n"
+                f"*Client OS*: {client_os}\n"
+                f"*Client Browser*: {client_browser}\n"
+                f"*Client City*: {client_city}\n\n"
+                f"*Outer Message*: \n>{outer_message}\n\n"
+                f"*Innermost Message*: \n>{innermost_message}\n\n"
+                f"*Custom Dimensions*: \n{custom_dimensions}\n\n"
+                f"*Details*: \n{details}\n"
+            )
+
     message = (
-        f"*Azure Alert ID: {alert_id}*\n"
-        f"*Azure Alert Fired: {alert_rule}*\n\n"
+        f"🚨 *Azure Alert Fired: {alert_rule}*\n\n"
         f"*Severity*: {severity}\n"
-        f"*Date*: {fired_date_time}\n\n"
-        f"<{investigation_link}|Click here to view the alert in Azure Portal>"
+        f"*Date*: {fired_date_time}\n"
+        f"*Alert ID*: {alert_id}\n\n"
+        f"---------------------------------------------------\n"
+        f"{additional_details}"
+        f"<{investigation_link}|Click here to investigate in Azure Portal>"
     )
 
     slack_payload = {"text": message}
