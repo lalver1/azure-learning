@@ -17,6 +17,10 @@ def fetch_log_details(api_link):
     response = requests.get(api_link, headers=headers)
     response.raise_for_status()
     data = response.json()
+    data_str = json.dumps(data, indent=2) # pretty print 2 spaces indent
+    if len(data_str) > 10000:  # 1 byte per char, roughly 10KB, Azure limits to 64KB
+        data_str = data_str[:10000] + "... [truncated]"
+    logging.info(f"Fetched log details: {data_str}")
     return data["tables"][0]["rows"][0] if data["tables"] else {}
 
 @app.route(route="alert_to_slack", auth_level=func.AuthLevel.ANONYMOUS, methods=["POST"])
@@ -56,7 +60,8 @@ def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
     investigation_link = essentials.get("investigationLink", "#")
     
     alert_context = data.get("alertContext", {})
-    api_link = alert_context.get("linkToSearchResultsAPI", "#")
+    condition = alert_context.get("condition", {})
+    api_link = condition.get("allOf", {[]})[0].get("linkToSearchResultsAPI", "#")
     latest_alert_details = fetch_log_details(api_link)
 
     message = (
