@@ -61,7 +61,7 @@ def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
     
     alert_context = data.get("alertContext", {})
     condition = alert_context.get("condition", {})
-    api_link = condition.get("allOf", {[]})[0].get("linkToSearchResultsAPI", "#")
+    api_link = condition.get("allOf", [{}])[0].get("linkToSearchResultsAPI", "#")
     latest_alert_details = fetch_log_details(api_link)
 
     message = (
