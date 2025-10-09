@@ -32,6 +32,15 @@ def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse("Request body is not valid JSON.", status_code=400)
 
     data = alert_data.get("data", {})
+    
+    try:
+        data_str = json.dumps(data, indent=2) # pretty print 2 spaces indent
+        if len(data_str) > 10000:  # 1 byte per char, roughly 10KB, Azure limits to 64KB
+            data_str = data_str[:10000] + "... [truncated]"
+        logging.info(f"Received Azure alert data:\n{data_str}")
+    except Exception as e:
+        logging.warning(f"Failed to serialize alert data for logging: {e}")
+    
     essentials = data.get("essentials", {})
     alert_id = essentials.get("alertId", "N/A")
     alert_rule = essentials.get("alertRule", "N/A")
