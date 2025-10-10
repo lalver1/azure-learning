@@ -1,10 +1,10 @@
-# changedd
+import json
 import logging
 import os
-import requests
-import json
+import textwrap
 
 import azure.functions as func
+import requests
 
 app = func.FunctionApp()
 
@@ -58,13 +58,29 @@ def select_search_results(data: dict) -> dict:
 
     return details
 
-def dict_to_bold_string(data: dict) -> str:
+def format_for_slack(data: dict) -> str:
     """
     Converts a dictionary into a formatted string with bolded keys for Slack messages.
     """
     if not data:
         return "_No additional details found._\n"
-    return "\n".join(f"*{key}:* {value}" for key, value in data.items()) + "\n"
+    formatted_lines = []
+    for k, v in data.items():
+        if k == "details":
+            details = json.loads(v)
+            if isinstance(details, list):
+                for item in details:
+                    for key, value in item.items():
+                        if key == "rawStack" and isinstance(v, str):
+                            # Format traceback as code block in Slack
+                            stack = textwrap.dedent(value).strip()
+                            formatted_lines.append(f"*{key}:*\n```{stack}```")
+            else:
+                formatted_lines.append(f"*details:* {details}")
+        else:
+            formatted_lines.append(f"*{k}:* {v}")
+    formatted_message = "\n".join(formatted_lines) + "\n"
+    return formatted_message
 
 
 @app.route(route="alert_to_slack", auth_level=func.AuthLevel.ANONYMOUS, methods=["POST"])
@@ -105,7 +121,7 @@ def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
     api_link = condition.get("allOf", [{}])[0].get("linkToSearchResultsAPI", "#")
     search_results = fetch_search_results(api_link)
     selected_search_results = select_search_results(search_results) if "error" not in search_results else {}
-    details_str = dict_to_bold_string(selected_search_results)
+    details_str = format_for_slack(selected_search_results)
 
     message = (
         f"🚨 *Azure Alert Fired: {alert_rule}*\n\n"
