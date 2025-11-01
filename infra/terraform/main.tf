@@ -4,6 +4,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.5"
+    }
   }
   backend "azurerm" {
         resource_group_name  = "web-flask-aca-rg"
@@ -108,6 +112,10 @@ resource "azurerm_key_vault" "kv" {
       "Backup",
       "Restore"
     ]
+
+    key_permissions = [
+    "Get", "List", "Create", "Delete", "Purge", "Recover", "Backup", "Restore"
+  ]
   }
 }
 
@@ -126,67 +134,80 @@ resource "azurerm_storage_account" "funcsa" {
   account_replication_type = "LRS"
 }
 
-# 9. Storage container for function packages
-resource "azurerm_storage_container" "funcpack" {
-  name                  = "function-releases"
-  storage_account_name  = azurerm_storage_account.funcsa.name
-  container_access_type = "private"
+# Generate a secure, random key for the function's webhook URL
+resource "random_string" "function_key" {
+  length  = 32
+  special = false
 }
 
-# 10. Archive the Python Azure Function code
-data "archive_file" "funczip" {
-  type        = "zip"
-  source_dir  = "${path.module}/../../azure_functions"   # assumes ./azure_functions has the function code
-  output_path = "${path.module}/../../azure_functions.zip"
-}
+# Deploy the Function App as a container
+resource "azurerm_container_app" "func_app_aca" {
+  name                         = "web-flask-func-aca"
+  container_app_environment_id = azurerm_container_app_environment.env.id
+  resource_group_name          = azurerm_resource_group.rg.name
+  revision_mode                = "Single"
 
-# 11. Upload zip to blob
-resource "azurerm_storage_blob" "funczip" {
-  name                   = "azure_functions-${data.archive_file.funczip.output_md5}.zip"
-  storage_account_name   = azurerm_storage_account.funcsa.name
-  storage_container_name = azurerm_storage_container.funcpack.name
-  type                   = "Block"
-  source                 = data.archive_file.funczip.output_path
-}
+  # Securely store secrets that will be injected as environment variables
+  secret {
+    name  = "slack-webhook-url-secret"
+    value = data.azurerm_key_vault_secret.slack_webhook_url.value
+  }
+  secret {
+    name  = "function-key-secret"
+    value = random_string.function_key.result
+  }
+  secret {
+    name  = "appinsights-api-key-secret"
+    value = azurerm_application_insights_api_key.appi_api_key.api_key
+  }
 
-# 12. App Service Plan for Function App
-resource "azurerm_service_plan" "funcplan" {
-  name                = "web-flask-funcplan"
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
-  os_type             = "Linux"
-  sku_name            = "Y1" 
-}
+  template {
+    container {
+      name   = "function-app-container"
+      image  = "ghcr.io/lalver1/azure-functions:${var.container_tag}"
+      cpu    = 0.25
+      memory = "0.5Gi"
 
-# 13. Function App running Oryx build during deployment
-resource "azurerm_linux_function_app" "funcapp" {
-  name                       = "web-flask-funcapp"
-  resource_group_name        = azurerm_resource_group.rg.name
-  location                   = azurerm_resource_group.rg.location
-  service_plan_id            = azurerm_service_plan.funcplan.id
-  storage_account_name       = azurerm_storage_account.funcsa.name
-  storage_account_access_key = azurerm_storage_account.funcsa.primary_access_key
-  functions_extension_version = "~4"
+      env {
+        name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
+        value = azurerm_application_insights.appi.connection_string
+      }
+      env {
+        name  = "AzureWebJobsStorage"
+        value = azurerm_storage_account.funcsa.primary_connection_string
+      }
+      env {
+        name        = "SLACK_WEBHOOK_URL"
+        secret_name = "slack-webhook-url-secret"
+      }
+      env {
+        name        = "AZURE_FUNCTION_KEY"
+        secret_name = "function-key-secret"
+      }
+      env {
+        name        = "APPINSIGHTS_API_KEY"
+        secret_name = "appinsights-api-key-secret"
+      }
+    }
+    
+    min_replicas = 1
+    max_replicas = 1
+  }
 
-  site_config {
-    application_stack {
-      docker{
-        registry_url = "https://ghcr.io"
-        image_name   = "ghcr.io/lalver1/azure-learning"
-        image_tag    = "${var.container_tag}"
-        }
+  ingress {
+    external_enabled = true
+    target_port      = 80
+    transport        = "auto"
+
+    traffic_weight {
+      percentage      = 100
+      latest_revision = true
     }
   }
 
-  app_settings = {
-    "SLACK_WEBHOOK_URL"        = data.azurerm_key_vault_secret.slack_webhook_url.value
-    "AzureWebJobsStorage"      = azurerm_storage_account.funcsa.primary_connection_string
-    "FUNCTIONS_WORKER_RUNTIME" = "python"
-  }
-
   identity {
-    type = "SystemAssigned"
-  }
+  type = "SystemAssigned"
+}
 }
 
 # 14. Action Group that posts to your Function App
@@ -197,7 +218,7 @@ resource "azurerm_monitor_action_group" "func_webhook" {
 
   webhook_receiver {
     name        = "funcapp-webhook"
-    service_uri = "https://${azurerm_linux_function_app.funcapp.default_hostname}/api/alert_to_slack?code=${data.azurerm_function_app_host_keys.func_keys.default_function_key}"
+    service_uri = "https://${azurerm_container_app.func_app_aca.ingress[0].fqdn}/api/alert_to_slack?CODE=${random_string.function_key.result}"
   }
 }
 
@@ -242,11 +263,19 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "app_error" {
   }
 }
 
-# 16. Fetch host keys for the function app
-data "azurerm_function_app_host_keys" "func_keys" {
-  name                = azurerm_linux_function_app.funcapp.name
-  resource_group_name = azurerm_resource_group.rg.name
+# 16. Create an API key for querying Application Insights data
+resource "azurerm_application_insights_api_key" "appi_api_key" {
+  name                    = "funcapp-api-query-key"
+  application_insights_id = azurerm_application_insights.appi.id
+
+  read_permissions = [
+    "search",
+  ]
 }
 
 
-
+output "current_function_master_key" {
+  value       = random_string.function_key.result
+  sensitive   = true
+  description = "The current master key for the function app. Use this for testing."
+}
