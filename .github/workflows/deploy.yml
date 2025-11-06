@@ -26,13 +26,14 @@ jobs:
         run: |
           az login --service-principal --username ${{ secrets.AZURE_CLIENT_ID }} --password ${{ secrets.AZURE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
           echo "Getting token for Azure DevOps..."
-          az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken --output tsv
+          AZURE_DEVOPS_TOKEN=$(az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken --output tsv)
           
           if [ -z "$AZURE_DEVOPS_TOKEN" ]; then
             echo "Failed to get Azure DevOps token"
             exit 1
           fi
           
+          export AZURE_DEVOPS_EXT_PAT=$AZURE_DEVOPS_TOKEN
           az devops configure --defaults organization=$ADO_ORG_URL project=$ADO_PROJECT_NAME
 
           echo "Listing pipelines..."

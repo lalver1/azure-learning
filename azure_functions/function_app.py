@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import logging
 import os
@@ -11,6 +12,34 @@ app = func.FunctionApp()
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL")
 FUNCTION_KEY = os.environ.get("AZURE_FUNCTION_KEY")
 APPINSIGHTS_API_KEY = os.environ.get("APPINSIGHTS_API_KEY")
+PRODUCTION_ALERT_RULE = "qr-error"
+
+
+def format_alert_date(date_str: str | None) -> str:
+    """
+    Parses an ISO date string, truncates milliseconds, and returns a formatted string.
+    Returns "N/A" if the date is None or is in an invalid format.
+    """
+    if not date_str:
+        return "N/A"
+    try:
+        date_obj = datetime.fromisoformat(date_str)
+        return date_obj.replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return "N/A"
+
+
+def validate_function_key(key: str) -> func.HttpResponse | None:
+    """
+    Validates the function key from the request.
+    Returns an HttpResponse if validation fails, None if it succeeds.
+    """
+    if not key:
+        return func.HttpResponse("Missing code authentication.", status_code=401)
+    if key != FUNCTION_KEY:
+        logging.warning("Invalid code provided.")
+        return func.HttpResponse("Unauthorized: invalid code.", status_code=403)
+    return None
 
 
 def fetch_search_results(api_link: str) -> dict:
@@ -23,13 +52,13 @@ def fetch_search_results(api_link: str) -> dict:
         response = requests.get(api_link, headers=headers)
         response.raise_for_status()
         data = response.json()
-        data_str = json.dumps(data, indent=2) # pretty print 2 spaces indent
+        data_str = json.dumps(data, indent=2)  # pretty print 2 spaces indent
         if len(data_str) > 10000:  # 1 byte per character, roughly 10KB, Azure limits to 64KB
             data_str = data_str[:10000] + "... [truncated]"
         logging.info(f"Fetched log details: {data_str}")
         return data["tables"][0] if data["tables"] else {}
-    except:
-        logging.error(f"Error fetching log details from API: {api_link}")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error fetching log details from API: {e}")
         return {"error": "Failed to fetch log details."}
 
 
@@ -41,22 +70,16 @@ def select_search_results(data: dict) -> dict:
     columns = [col["name"] for col in json_columns]
     rows: list[list[str | None | int]] = data["rows"]
 
-    selected_columns = [
-    "problemId",
-    "outerMessage",
-    "details",
-    "client_City",
-    "client_StateOrProvince",
-    "cloud_RoleInstance"
-    ]
+    selected_columns = ["problemId", "outerMessage", "details", "client_City", "client_StateOrProvince", "cloud_RoleInstance"]
     selected_columns_indexes = {col: columns.index(col) for col in selected_columns}
 
     details = {}
-    for row in rows: # only one row expected but loop anyway
+    for row in rows:  # only one row expected but loop anyway
         entry = {col: row[selected_columns_indexes[col]] for col in selected_columns}
         details.update(entry)
 
     return details
+
 
 def format_for_slack(data: dict) -> str:
     """
@@ -67,55 +90,45 @@ def format_for_slack(data: dict) -> str:
     formatted_lines = []
     for k, v in data.items():
         if k == "details":
-            details = json.loads(v)
-            if isinstance(details, list):
-                for item in details:
-                    for key, value in item.items():
-                        if key == "rawStack" and isinstance(v, str):
-                            # Format traceback as code block in Slack
-                            stack = textwrap.dedent(value).strip()
-                            formatted_lines.append(f"*{key}:*\n```{stack}```")
-            else:
-                formatted_lines.append(f"*details:* {details}")
+            try:
+                details = json.loads(v)
+                if isinstance(details, list):
+                    for item in details:
+                        for key, value in item.items():
+                            if key == "rawStack" and isinstance(value, str):
+                                # Format traceback as code block in Slack
+                                stack = textwrap.dedent(value).strip()
+                                lines = stack.splitlines()
+                                if len(lines) > 20:
+                                    first_10_lines = "\n".join(lines[:10])
+                                    last_10_lines = "\n".join(lines[-10:])
+                                    stack = f"{first_10_lines}\n ... \n{last_10_lines}"
+                                formatted_lines.append(f"*{key}:*\n```\n{stack}\n```")
+                else:
+                    formatted_lines.append(f"*details:* {details}")
+            except json.JSONDecodeError:
+                formatted_lines.append(f"*{k}:* {v}")
         else:
             formatted_lines.append(f"*{k}:* {v}")
     formatted_message = "\n".join(formatted_lines) + "\n"
     return formatted_message
 
 
-@app.route(route="alert_to_slack", auth_level=func.AuthLevel.ANONYMOUS, methods=["POST"])
-def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
+def build_slack_message(data: dict) -> str:
     """
-    Receives an alert from Azure Monitor, formats it, and sends it to Slack via webhook.
+    Builds the Slack message string from the alert data.
     """
-    logging.info("alert_to_slack processed a request.")
-
-    provided_code = req.params.get("CODE")
-    if not provided_code:
-        return func.HttpResponse("Missing CODE authentication.", status_code=401)
-    if provided_code != FUNCTION_KEY:
-        logging.warning("Invalid CODE provided.")
-        return func.HttpResponse("Unauthorized: invalid CODE.", status_code=403)
-    
-    try:
-        alert_data = req.get_json()
-    except ValueError:
-        return func.HttpResponse("Request body is not valid JSON.", status_code=400)
-
-    data = alert_data.get("data", {})
-    
-    data_str = json.dumps(data, indent=2) # pretty print 2 spaces indent
-    if len(data_str) > 10000:  # 1 byte per char, roughly 10KB, Azure limits to 64KB
-        data_str = data_str[:10000] + "... [truncated]"
-    logging.info(f"Received Azure alert data:\n{data_str}")
-    
+    # See https://learn.microsoft.com/en-us/azure/azure-monitor/alerts/alerts-common-schema for available fields
     essentials = data.get("essentials", {})
     alert_id = essentials.get("alertId", "N/A")
     alert_rule = essentials.get("alertRule", "N/A")
+    emoji_prefix = ""
+    if alert_rule == PRODUCTION_ALERT_RULE:
+        emoji_prefix = "🚨 "
     severity = essentials.get("severity", "N/A")
-    fired_date_time = essentials.get("firedDateTime", "N/A")
+    fired_date_time = format_alert_date(essentials.get("firedDateTime"))
     investigation_link = essentials.get("investigationLink", "#")
-    
+
     alert_context = data.get("alertContext", {})
     condition = alert_context.get("condition", {})
     api_link = condition.get("allOf", [{}])[0].get("linkToSearchResultsAPI", "#")
@@ -124,7 +137,7 @@ def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
     details_str = format_for_slack(selected_search_results)
 
     message = (
-        f"🚨 *Azure Alert Fired: {alert_rule}*\n\n"
+        f"{emoji_prefix}*Azure Alert Fired: {alert_rule}*\n\n"
         f"*Severity*: {severity}\n"
         f"*Date*: {fired_date_time}\n"
         f"*Alert ID*: {alert_id}\n\n"
@@ -133,6 +146,34 @@ def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
         f"<{investigation_link}|Click here to investigate in Azure Portal>"
     )
 
+    return message
+
+
+@app.route(route="alert_to_slack", auth_level=func.AuthLevel.ANONYMOUS, methods=["POST"])
+def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Receives an alert from Azure Monitor, formats it, and sends it to Slack via webhook.
+    """
+    logging.info("alert_to_slack received a request.")
+
+    provided_code = req.params.get("code")
+    auth_response = validate_function_key(provided_code)
+    if auth_response:
+        return auth_response
+
+    try:
+        alert_payload = req.get_json()
+    except ValueError:
+        return func.HttpResponse("Request body is not valid JSON.", status_code=400)
+
+    data = alert_payload.get("data", {})
+
+    data_str = json.dumps(data, indent=2)  # pretty print 2 spaces indent
+    if len(data_str) > 10000:  # 1 byte per char, roughly 10KB, Azure limits to 64KB
+        data_str = data_str[:10000] + "... [truncated]"
+    logging.info(f"Received Azure alert data:\n{data_str}")
+
+    message = build_slack_message(data)
     slack_payload = {"text": message}
 
     try:
