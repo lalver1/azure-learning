@@ -12,7 +12,7 @@ app = func.FunctionApp()
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL")
 FUNCTION_KEY = os.environ.get("AZURE_FUNCTION_KEY")
 APPINSIGHTS_API_KEY = os.environ.get("APPINSIGHTS_API_KEY")
-PRODUCTION_ALERT_RULE = "qr-error"
+PRODUCTION_ALERT_RULE = "msqalert-cdt-pub-vip-ddrc-P-001"
 
 
 def format_alert_date(date_str: str | None) -> str:
@@ -27,6 +27,20 @@ def format_alert_date(date_str: str | None) -> str:
         return date_obj.replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
     except ValueError:
         return "N/A"
+
+
+def format_raw_stack(raw_stack: str) -> str:
+    """
+    Truncate long raw stack traces for better readability in Slack messages.
+    Returns the original stack trace if it's short enough.
+    """
+    stack = textwrap.dedent(raw_stack).strip()
+    lines = stack.splitlines()
+    if len(lines) > 20:
+        first_10_lines = "\n".join(lines[:10])
+        last_10_lines = "\n".join(lines[-10:])
+        stack = f"{first_10_lines}\n ... \n{last_10_lines}"
+    return stack
 
 
 def validate_function_key(key: str) -> func.HttpResponse | None:
@@ -81,7 +95,7 @@ def select_search_results(data: dict) -> dict:
     return details
 
 
-def format_for_slack(data: dict) -> str:
+def format_search_results(data: dict) -> str:
     """
     Converts a dictionary into a formatted string with bolded keys for Slack messages.
     """
@@ -96,25 +110,29 @@ def format_for_slack(data: dict) -> str:
                     for item in details:
                         for key, value in item.items():
                             if key == "rawStack" and isinstance(value, str):
-                                # Format traceback as code block in Slack
-                                stack = textwrap.dedent(value).strip()
-                                lines = stack.splitlines()
-                                if len(lines) > 20:
-                                    first_10_lines = "\n".join(lines[:10])
-                                    last_10_lines = "\n".join(lines[-10:])
-                                    stack = f"{first_10_lines}\n ... \n{last_10_lines}"
-                                formatted_lines.append(f"*{key}:*\n```\n{stack}\n```")
+                                stack = format_raw_stack(value)
+                                formatted_lines.append(f"*{key}*:\n```\n{stack}\n```")
                 else:
                     formatted_lines.append(f"*details:* {details}")
             except json.JSONDecodeError:
-                formatted_lines.append(f"*{k}:* {v}")
+                formatted_lines.append(f"*{k}*: {v}")
         else:
-            formatted_lines.append(f"*{k}:* {v}")
+            formatted_lines.append(f"*{k}*: {v}")
     formatted_message = "\n".join(formatted_lines) + "\n"
     return formatted_message
 
 
-def build_slack_message(data: dict) -> str:
+def get_details_string(data: dict) -> str:
+    alert_context = data.get("alertContext", {})
+    condition = alert_context.get("condition", {})
+    api_link = condition.get("allOf", [{}])[0].get("linkToSearchResultsAPI", "#")
+    search_results = fetch_search_results(api_link)
+    selected_search_results = select_search_results(search_results) if "error" not in search_results else {}
+    details_str = format_search_results(selected_search_results)
+    return details_str
+
+
+def build_slack_message(data: dict, details: str) -> str:
     """
     Builds the Slack message string from the alert data.
     """
@@ -129,24 +147,29 @@ def build_slack_message(data: dict) -> str:
     fired_date_time = format_alert_date(essentials.get("firedDateTime"))
     investigation_link = essentials.get("investigationLink", "#")
 
-    alert_context = data.get("alertContext", {})
-    condition = alert_context.get("condition", {})
-    api_link = condition.get("allOf", [{}])[0].get("linkToSearchResultsAPI", "#")
-    search_results = fetch_search_results(api_link)
-    selected_search_results = select_search_results(search_results) if "error" not in search_results else {}
-    details_str = format_for_slack(selected_search_results)
-
     message = (
         f"{emoji_prefix}*Azure Alert Fired: {alert_rule}*\n\n"
         f"*Severity*: {severity}\n"
         f"*Date*: {fired_date_time}\n"
         f"*Alert ID*: {alert_id}\n\n"
         f"---------------------------------------------------\n"
-        f"{details_str}"
+        f"{details}"
         f"<{investigation_link}|Click here to investigate in Azure Portal>"
     )
 
     return message
+
+
+def send_to_slack(message: str) -> func.HttpResponse:
+    payload = {"text": message}
+    try:
+        response = requests.post(SLACK_WEBHOOK_URL, json=payload)
+        response.raise_for_status()  # Raise an exception for bad status codes
+        logging.info(f"Successfully sent message to Slack. Status: {response.status_code}")
+        return func.HttpResponse("Alert successfully forwarded to Slack.", status_code=200)
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending message to Slack: {e}")
+        return func.HttpResponse(f"Error sending to Slack: {e}", status_code=500)
 
 
 @app.route(route="alert_to_slack", auth_level=func.AuthLevel.ANONYMOUS, methods=["POST"])
@@ -173,17 +196,11 @@ def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
         data_str = data_str[:10000] + "... [truncated]"
     logging.info(f"Received Azure alert data:\n{data_str}")
 
-    message = build_slack_message(data)
-    slack_payload = {"text": message}
+    details = get_details_string(data)
+    message = build_slack_message(data, details)
+    slack_response = send_to_slack(message)
 
-    try:
-        response = requests.post(SLACK_WEBHOOK_URL, json=slack_payload)
-        response.raise_for_status()  # Raise an exception for bad status codes
-        logging.info(f"Successfully sent message to Slack. Status: {response.status_code}")
-        return func.HttpResponse("Alert successfully forwarded to Slack.", status_code=200)
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error sending message to Slack: {e}")
-        return func.HttpResponse(f"Error sending to Slack: {e}", status_code=500)
+    return slack_response
 
 
 @app.route(route="health", auth_level=func.AuthLevel.ANONYMOUS, methods=["GET"])
