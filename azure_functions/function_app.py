@@ -12,7 +12,7 @@ app = func.FunctionApp()
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL")
 FUNCTION_KEY = os.environ.get("AZURE_FUNCTION_KEY")
 APPINSIGHTS_API_KEY = os.environ.get("APPINSIGHTS_API_KEY")
-PRODUCTION_ALERT_RULE = "msqalert-cdt-pub-vip-ddrc-P-001"
+PRODUCTION_ALERT_RULE = "qr-error"
 
 
 def format_alert_date(date_str: str | None) -> str:
@@ -183,11 +183,14 @@ def alert_to_slack(req: func.HttpRequest) -> func.HttpResponse:
     auth_response = validate_function_key(provided_code)
     if auth_response:
         return auth_response
+    logging.info("alert_to_slack got a valid code.")
 
     try:
         alert_payload = req.get_json()
     except ValueError:
         return func.HttpResponse("Request body is not valid JSON.", status_code=400)
+    
+    logging.info("alert_to_slack got a valid JSON in the request.")
 
     data = alert_payload.get("data", {})
 
