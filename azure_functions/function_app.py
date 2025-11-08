@@ -84,7 +84,7 @@ def select_search_results(data: dict) -> dict:
     columns = [col["name"] for col in json_columns]
     rows: list[list[str | None | int]] = data["rows"]
 
-    selected_columns = ["problemId", "outerMessage", "details", "client_City", "client_StateOrProvince", "cloud_RoleInstance"]
+    selected_columns = ["outerMessage", "details"]
     selected_columns_indexes = {col: columns.index(col) for col in selected_columns}
 
     details = {}
@@ -102,22 +102,23 @@ def format_search_results(data: dict) -> str:
     if not data:
         return "_No additional details found._\n"
     formatted_lines = []
-    for k, v in data.items():
-        if k == "details":
-            try:
-                details = json.loads(v)
-                if isinstance(details, list):
-                    for item in details:
-                        for key, value in item.items():
-                            if key == "rawStack" and isinstance(value, str):
-                                stack = format_raw_stack(value)
-                                formatted_lines.append(f"*{key}*:\n```\n{stack}\n```")
-                else:
-                    formatted_lines.append(f"*details:* {details}")
-            except json.JSONDecodeError:
-                formatted_lines.append(f"*{k}*: {v}")
+    
+    message = data.get("outerMessage","")
+    formatted_lines.append(f"*Message*: {message}")
+
+    details = data.get("details","")
+    try:
+        details = json.loads(details)
+        if isinstance(details, list):
+            details_item = details[0]
+            rawstack = details_item.get("rawStack","")
+            stack = format_raw_stack(rawstack)
+            formatted_lines.append(f"*details*:\n```\n{stack}\n```")
         else:
-            formatted_lines.append(f"*{k}*: {v}")
+            formatted_lines.append(f"*details:* {details}")
+    except json.JSONDecodeError:
+        formatted_lines.append(f"*details*: {details}")
+    
     formatted_message = "\n".join(formatted_lines) + "\n"
     return formatted_message
 
