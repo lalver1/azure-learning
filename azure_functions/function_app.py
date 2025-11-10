@@ -15,6 +15,15 @@ APPINSIGHTS_API_KEY = os.environ.get("APPINSIGHTS_API_KEY")
 PRODUCTION_ALERT_RULE = "qr-error"
 
 
+def format_item(key: str, value: str | None) -> str:
+    """
+    Formats a key-value pair for the Slack message with bolded key.
+    Returns "N/A" if the value is None.
+    """
+    if value is None:
+        value = "N/A"
+    return f"*{key}*: {value}"
+
 def format_alert_date(date_str: str | None) -> str:
     """
     Parses an ISO date string, truncates milliseconds, and returns a formatted string.
@@ -104,7 +113,7 @@ def format_search_results(data: dict) -> str:
     formatted_lines = []
     
     message = data.get("outerMessage","")
-    formatted_lines.append(f"*Message*: {message}")
+    formatted_lines.append(format_item("Message", message))
 
     details = data.get("details","")
     try:
@@ -113,11 +122,11 @@ def format_search_results(data: dict) -> str:
             details_item = details[0]
             rawstack = details_item.get("rawStack","")
             stack = format_raw_stack(rawstack)
-            formatted_lines.append(f"*details*:\n```\n{stack}\n```")
+            formatted_lines.append(f"*Details*:\n```\n{stack}\n```")
         else:
-            formatted_lines.append(f"*details:* {details}")
+            formatted_lines.append(format_item("Details", details))
     except json.JSONDecodeError:
-        formatted_lines.append(f"*details*: {details}")
+        formatted_lines.append(format_item("Details", details))
     
     formatted_message = "\n".join(formatted_lines) + "\n"
     return formatted_message
@@ -148,11 +157,15 @@ def build_slack_message(data: dict, details: str) -> str:
     fired_date_time = format_alert_date(essentials.get("firedDateTime"))
     investigation_link = essentials.get("investigationLink", "#")
 
+    alert_id_str = format_item("Alert ID", alert_id)
+    severity_str = format_item("Severity", severity)
+    date_str = format_item("Date", fired_date_time) 
+    
     message = (
         f"{emoji_prefix}*Azure Alert Fired: {alert_rule}*\n\n"
-        f"*Severity*: {severity}\n"
-        f"*Date*: {fired_date_time}\n"
-        f"*Alert ID*: {alert_id}\n\n"
+        f"{severity_str}\n"
+        f"{date_str}\n"
+        f"{alert_id_str}\n\n"
         f"---------------------------------------------------\n"
         f"{details}"
         f"<{investigation_link}|Click here to investigate in Azure Portal>"
