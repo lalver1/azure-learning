@@ -238,7 +238,7 @@ resource "azurerm_monitor_action_group" "main" {
 
   webhook_receiver {
     name        = "funcapp-webhook"
-    service_uri = "https://${azurerm_container_app.funcs.ingress[0].fqdn}/api/alert_to_slack?CODE=${random_string.function_key.result}"
+    service_uri = "https://${azurerm_container_app.funcs.ingress[0].fqdn}/api/alert_to_slack?code=${random_string.function_key.result}"
   }
 }
 
