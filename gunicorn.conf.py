@@ -5,6 +5,7 @@ max_requests = 1000
 max_requests_jitter = 50
 
 log_file = "-"
+accesslog = "/tmp/gunicorn.access.log"
 
 bind = "0.0.0.0:50505"
 
