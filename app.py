@@ -1,3 +1,4 @@
+import logging
 import os
 
 from flask import (Flask, redirect, render_template, request,
@@ -6,12 +7,15 @@ from azure.monitor.opentelemetry import configure_azure_monitor
 
 configure_azure_monitor()
 
+logger = logging.getLogger('flask_app')
+logger.setLevel(logging.INFO)
+
 app = Flask(__name__)
 
 
 @app.route('/')
 def index():
-   print('Request for index page received')
+   logger.info('Request for index page received')
    return render_template('index.html')
 
 @app.route('/favicon.ico')
@@ -38,10 +42,10 @@ def hello():
         pass
     raise CustomError("This is a custom-defined exception")
    elif name:
-    print('Request for hello page received with name=%s' % name)
+    logger.info('Request for hello page received with name=%s' % name)
     return render_template('hello.html', name = name)
    else:
-    print('Request for hello page received with no name or blank name -- redirecting')
+    logger.info('Request for hello page received with no name or blank name -- redirecting')
     return redirect(url_for('index'))
 
 
