@@ -370,3 +370,19 @@ resource "azurerm_communication_service_email_domain_association" "custom" {
   communication_service_id = azurerm_communication_service.main.id
   email_service_domain_id  = azurerm_email_communication_service_domain.custom[0].id
 }
+
+resource "azurerm_log_analytics_saved_search" "app_traces_query" {
+  name                       = "HighSeverityAppErrors"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
+  display_name               = "High Severity App Errors"
+  category                   = "My Application Insights Queries"
+  
+  # The KQL query uses the AppTraces table stored in the LAW
+  query = <<-QUERY
+    AppTraces
+  QUERY
+
+  lifecycle {
+    ignore_changes = [tags]
+  }
+}
