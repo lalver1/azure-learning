@@ -24,6 +24,18 @@ provider "azurerm" {
 # Get information about the current Azure client (logged-in identity)
 data "azurerm_client_config" "current" {}
 
+# 0. local variables
+locals {
+  custom_domain_name = "example.com"
+  flag = 0
+  is_flag = local.flag == 1
+  sender_domain = local.is_flag ? azurerm_email_communication_service_domain.custom[0].mail_from_sender_domain : azurerm_email_communication_service_domain.azure_managed[0].mail_from_sender_domain
+  sender_email = "DoNotReply@${local.sender_domain}"
+  data_location = "United States"
+  email_service_name = "EmailCommServices"
+  communication_service_name = "GeneralCommServices"
+}
+
 # 1. Resource group
 # Initially created manually to hold the tfstate storage account
 # Import once before the first terraform apply
@@ -291,4 +303,70 @@ resource "azurerm_application_insights_api_key" "main" {
   read_permissions = [
     "search",
   ]
+}
+
+# 14. Communication Services
+
+resource "azurerm_communication_service" "main" {
+  name                = local.communication_service_name
+  resource_group_name = azurerm_resource_group.main.name
+  data_location       = local.data_location
+
+  lifecycle {
+    ignore_changes = [tags]
+  }
+}
+
+resource "azurerm_email_communication_service" "main" {
+  name                = local.email_service_name
+  resource_group_name = azurerm_resource_group.main.name
+  data_location       = local.data_location
+
+  lifecycle {
+    ignore_changes = [tags]
+  }
+}
+
+resource "azurerm_email_communication_service_domain" "azure_managed" {
+  count = local.is_flag ? 0 : 1
+
+  # when domain_management="AzureManaged",
+  # the name has to be "AzureManagedDomain"
+  # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/email_communication_service_domain#name-19
+  name                             = "AzureManagedDomain"
+  email_service_id                 = azurerm_email_communication_service.main.id
+  domain_management                = "AzureManaged"
+  user_engagement_tracking_enabled = true
+
+  lifecycle {
+    ignore_changes = [tags]
+  }
+}
+
+resource "azurerm_communication_service_email_domain_association" "azure_managed" {
+  count = local.is_flag ? 0 : 1
+
+  communication_service_id = azurerm_communication_service.main.id
+  email_service_domain_id  = azurerm_email_communication_service_domain.azure_managed[0].id
+}
+
+# This domain is only created when local.is_flag is true.
+resource "azurerm_email_communication_service_domain" "custom" {
+  count = local.is_flag ? 1 : 0
+
+  name                             = local.custom_domain_name
+  email_service_id                 = azurerm_email_communication_service.main.id
+  domain_management                = "CustomerManaged"
+  user_engagement_tracking_enabled = true
+
+  lifecycle {
+    ignore_changes = [tags]
+  }
+}
+
+resource "azurerm_communication_service_email_domain_association" "custom" {
+  count = local.is_flag ? 1 : 0
+
+  communication_service_id = azurerm_communication_service.main.id
+  email_service_domain_id  = azurerm_email_communication_service_domain.custom[0].id
 }
