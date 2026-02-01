@@ -10,11 +10,11 @@ terraform {
     }
   }
   backend "azurerm" {
-        resource_group_name  = "rg-aca-web"
-        storage_account_name = "salalver1al"
-        container_name       = "tfstate"
-        key                  = "terraform.tfstate"
-      }
+    resource_group_name  = "rg-aca-web"
+    storage_account_name = "salalver1al"
+    container_name       = "tfstate"
+    key                  = "terraform.tfstate"
+  }
 }
 
 provider "azurerm" {
@@ -26,13 +26,13 @@ data "azurerm_client_config" "current" {}
 
 # 0. local variables
 locals {
-  custom_domain_name = "example.com"
-  flag = 0
-  is_flag = local.flag == 1
-  sender_domain = local.is_flag ? azurerm_email_communication_service_domain.custom[0].mail_from_sender_domain : azurerm_email_communication_service_domain.azure_managed[0].mail_from_sender_domain
-  sender_email = "DoNotReply@${local.sender_domain}"
-  data_location = "United States"
-  email_service_name = "EmailCommServices"
+  custom_domain_name         = "example.com"
+  flag                       = 0
+  is_flag                    = local.flag == 1
+  sender_domain              = local.is_flag ? azurerm_email_communication_service_domain.custom[0].mail_from_sender_domain : azurerm_email_communication_service_domain.azure_managed[0].mail_from_sender_domain
+  sender_email               = "DoNotReply@${local.sender_domain}"
+  data_location              = "United States"
+  email_service_name         = "EmailCommServices"
   communication_service_name = "GeneralCommServices"
 }
 
@@ -98,9 +98,9 @@ resource "azurerm_container_app" "web" {
     target_port      = 50505 # match the port the Flask app listens on
     traffic_weight {
       latest_revision = true
-      percentage=100
-      }
-    transport        = "auto"
+      percentage      = 100
+    }
+    transport = "auto"
   }
 
   template {
@@ -109,8 +109,8 @@ resource "azurerm_container_app" "web" {
       image  = "ghcr.io/lalver1/azure-learning:${var.container_tag}"
       cpu    = 0.5
       memory = "1.0Gi"
-    
-    env {
+
+      env {
         name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
         value = azurerm_application_insights.main.connection_string
       }
@@ -138,11 +138,11 @@ resource "azurerm_application_insights" "main" {
 
 # 7. Key Vault
 resource "azurerm_key_vault" "main" {
-  name                        = "kv-al"
-  location                    = azurerm_resource_group.main.location
-  resource_group_name         = azurerm_resource_group.main.name
-  tenant_id                   = data.azurerm_client_config.current.tenant_id
-  sku_name                    = "standard"
+  name                = "kv-al"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  sku_name            = "standard"
 
   access_policy {
     tenant_id = data.azurerm_client_config.current.tenant_id
@@ -160,8 +160,8 @@ resource "azurerm_key_vault" "main" {
     ]
 
     key_permissions = [
-    "Get", "List", "Create", "Delete", "Purge", "Recover", "Backup", "Restore"
-  ]
+      "Get", "List", "Create", "Delete", "Purge", "Recover", "Backup", "Restore"
+    ]
   }
 }
 
@@ -226,7 +226,7 @@ resource "azurerm_container_app" "funcs" {
         secret_name = "appinsights-api-key-secret"
       }
     }
-    
+
     min_replicas = 1
     max_replicas = 1
   }
@@ -243,8 +243,8 @@ resource "azurerm_container_app" "funcs" {
   }
 
   identity {
-  type = "SystemAssigned"
-}
+    type = "SystemAssigned"
+  }
 }
 
 # 11. Action Group that posts to the Functions App
@@ -275,11 +275,11 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "main" {
   window_duration      = "PT5M"
 
   criteria {
-    query     = <<-QUERY
+    query                   = <<-QUERY
       union (exceptions | where type !has "ServiceResponseError"), (traces | where severityLevel >= 3)
     QUERY
-    operator  = "GreaterThan"
-    threshold = 0
+    operator                = "GreaterThan"
+    threshold               = 0
     time_aggregation_method = "Count"
 
     failing_periods {
@@ -381,7 +381,7 @@ resource "azurerm_log_analytics_saved_search" "app_traces_query" {
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
   display_name               = "High Severity App Errors"
   category                   = "My Application Insights Queries"
-  
+
   # The KQL query uses the AppTraces table stored in the LAW
   query = <<-QUERY
     AppTraces
