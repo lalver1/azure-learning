@@ -68,9 +68,14 @@ resource "azurerm_storage_account" "main" {
     }
   }
 
-  network_rules {
-    default_action = "Deny"
-    bypass         = ["AzureServices"]
+  dynamic "network_rules" {
+    for_each = var.enable_storage_firewall ? [1] : []
+    content {
+
+      default_action = "Deny"
+      bypass         = ["AzureServices"]
+
+    }
   }
 }
 
