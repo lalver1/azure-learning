@@ -7,3 +7,20 @@ steps:
 
 - script: echo "Hello from Azure DevOps! The pipeline ran successfully."
   displayName: 'Print Success Message'
+
+- task: TerraformInstaller@1
+  displayName: 'Install Terraform'
+  inputs:
+    terraformVersion: 1.13.4
+- task: TerraformTaskV4@4
+  displayName: 'Terraform Init'
+  inputs:
+    provider: 'azurerm'
+    command: 'init'
+    workingDirectory: "$(System.DefaultWorkingDirectory)/terraform"
+    commandsOptions: -input=false
+    backendServiceArm: azure-learning
+    backendAzureRmResourceGroupName: rg-aca-web
+    backendAzureRmStorageAccountName: salalver1al
+    backendAzureRmContainerName: tfstate
+    backendAzureRmKey: terraform.tfstate
