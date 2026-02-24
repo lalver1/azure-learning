@@ -1,5 +1,7 @@
 trigger: none
 
+# Fill in with trigger config
+
 pool:
   vmImage: 'ubuntu-latest'
 
