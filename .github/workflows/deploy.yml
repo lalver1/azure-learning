@@ -1,40 +1,31 @@
 name: Deploy
-
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-
-defaults:
-  run:
-    shell: bash
-
+permissions:
+  id-token: write
+  contents: read
 jobs:
-  # TODO: Reuse the build job from publish_function.yml
-  deploy:
+  create-resource-group:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-
+    defaults:
+      run:
+        working-directory: infra/terraform
     steps:
-      - name: Show Azure DevOps pipelines
-        env:
-          ADO_ORG_URL: ${{ vars.ADO_ORG_URL }}
-          ADO_PROJECT_NAME: ${{ vars.ADO_PROJECT_NAME }}
-        run: |
-          az login --service-principal --username ${{ secrets.AZURE_CLIENT_ID }} --password ${{ secrets.AZURE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
-          echo "Getting token for Azure DevOps..."
-          AZURE_DEVOPS_TOKEN=$(az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken --output tsv)
-          
-          if [ -z "$AZURE_DEVOPS_TOKEN" ]; then
-            echo "Failed to get Azure DevOps token"
-            exit 1
-          fi
-          
-          export AZURE_DEVOPS_EXT_PAT=$AZURE_DEVOPS_TOKEN
-          az devops configure --defaults organization=$ADO_ORG_URL project=$ADO_PROJECT_NAME
+    - name: Check out the repository
+      uses: actions/checkout@v6
+    
+    - name: Log in to Azure using Federated Credentials
+      uses: azure/login@v1
+      with:
+        client-id: ${{ secrets.AZURE_MI_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_MI_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_MI_SUBSCRIPTION_ID }}
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
 
-          echo "Listing pipelines..."
-          az pipelines list --output table
+    - name: Terraform Init
+      run: terraform init
+
+    - name: Terraform Plan
+      run: terraform plan
