@@ -19,6 +19,7 @@ terraform {
 
 provider "azurerm" {
   features {}
+  subscription_id = var.subscription_id
 }
 
 # Get information about the current Azure client (logged-in identity)
