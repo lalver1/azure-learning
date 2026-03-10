@@ -51,7 +51,7 @@ jobs:
         terraform plan \
           -var "container_tag=4c223c07fb3f2bd45ce55a8af9ad6922af368ece" \
           -var "subscription_id=${{ secrets.AZURE_MI_SUBSCRIPTION_ID }}" \
-          -var "env_suffix=${{ vars.RG }}"
+          -var "env_suffix=${{ vars.RG }}" \
           -out=tfplan
     
     - name: Terraform Apply
