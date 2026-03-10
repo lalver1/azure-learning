@@ -23,7 +23,7 @@ permissions:
 jobs:
   create-infra:
     runs-on: ubuntu-latest
-    # Selects 'test' for -rc tags, 'prod' for regular tags, or branch name otherwise
+    # Selects 'test' for -rc tags, 'prod' for regular tags, 'preview' for PRs and 'main' otherwise
     environment: >-
       ${{ github.event_name == 'pull_request' && 'preview' || 
           (github.ref_type != 'tag' && github.ref_name || 
