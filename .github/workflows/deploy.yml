@@ -24,7 +24,10 @@ jobs:
   create-infra:
     runs-on: ubuntu-latest
     # Selects 'test' for -rc tags, 'prod' for regular tags, or branch name otherwise
-    environment: ${{ github.ref_type != 'tag' && github.ref_name || contains(github.ref, '-rc') && 'test' || 'prod' }}
+    environment: >-
+      ${{ github.event_name == 'pull_request' && 'preview' || 
+          (github.ref_type != 'tag' && github.ref_name || 
+          (contains(github.ref, '-rc') && 'test' || 'prod')) }}
     
     defaults:
       run:
