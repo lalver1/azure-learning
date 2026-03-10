@@ -192,7 +192,7 @@ resource "azurerm_container_app" "funcs" {
   }
   secret {
     name  = "function-key-secret"
-    value = random_string.function_key.result
+    value = random_password.function_key.result
   }
   secret {
     name  = "appinsights-api-key-secret"
@@ -256,7 +256,7 @@ resource "azurerm_monitor_action_group" "main" {
 
   webhook_receiver {
     name        = "funcapp-webhook"
-    service_uri = "https://${azurerm_container_app.funcs.ingress[0].fqdn}/api/alert_to_slack?code=${random_string.function_key.result}"
+    service_uri = "https://${azurerm_container_app.funcs.ingress[0].fqdn}/api/alert_to_slack?code=${random_password.function_key.result}"
   }
 }
 
