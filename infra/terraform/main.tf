@@ -33,8 +33,8 @@ locals {
   sender_domain              = local.is_flag ? azurerm_email_communication_service_domain.custom[0].mail_from_sender_domain : azurerm_email_communication_service_domain.azure_managed[0].mail_from_sender_domain
   sender_email               = "DoNotReply@${local.sender_domain}"
   data_location              = "United States"
-  email_service_name         = "EmailCommServices"
-  communication_service_name = "GeneralCommServices"
+  email_service_name         = "EmailCommServices-${var.env_suffix}"
+  communication_service_name = "GeneralCommServices-${var.env_suffix}"
 }
 
 # 1. Resource group
@@ -49,7 +49,7 @@ resource "azurerm_resource_group" "main" {
 # Initially created manually to hold the tfstate file
 # Import once before the first terraform apply
 resource "azurerm_storage_account" "main" {
-  name                          = "salalver1al"
+  name                          = "salalver1al-${var.env_suffix}"
   resource_group_name           = azurerm_resource_group.main.name
   location                      = azurerm_resource_group.main.location
   account_tier                  = "Standard"
@@ -82,14 +82,14 @@ resource "azurerm_storage_account" "main" {
 
 # 3. Container App Environment
 resource "azurerm_container_app_environment" "main" {
-  name                = "web-aca-env"
+  name                = "web-aca-env-${var.env_suffix}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
 }
 
 # 4. Container App - Web
 resource "azurerm_container_app" "web" {
-  name                         = "aca-web"
+  name                         = "aca-web-${var.env_suffix}"
   container_app_environment_id = azurerm_container_app_environment.main.id
   resource_group_name          = azurerm_resource_group.main.name
   revision_mode                = "Single"
@@ -121,7 +121,7 @@ resource "azurerm_container_app" "web" {
 
 # 5. Log Analytics Workspace (needed for App Insights)
 resource "azurerm_log_analytics_workspace" "main" {
-  name                = "law-web"
+  name                = "law-web-${var.env_suffix}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   sku                 = "PerGB2018"
@@ -130,7 +130,7 @@ resource "azurerm_log_analytics_workspace" "main" {
 
 # 6. Application Insights
 resource "azurerm_application_insights" "main" {
-  name                = "appi-web"
+  name                = "appi-web-${var.env_suffix}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   application_type    = "web"
@@ -139,7 +139,7 @@ resource "azurerm_application_insights" "main" {
 
 # 7. Key Vault
 resource "azurerm_key_vault" "main" {
-  name                = "kv-al"
+  name                = "kv-al-${var.env_suffix}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   tenant_id           = data.azurerm_client_config.current.tenant_id
@@ -180,7 +180,7 @@ resource "random_password" "function_key" {
 
 # 10. Container App - Azure Functions
 resource "azurerm_container_app" "funcs" {
-  name                         = "aca-funcs"
+  name                         = "aca-funcs-${var.env_suffix}"
   container_app_environment_id = azurerm_container_app_environment.main.id
   resource_group_name          = azurerm_resource_group.main.name
   revision_mode                = "Single"
@@ -250,7 +250,7 @@ resource "azurerm_container_app" "funcs" {
 
 # 11. Action Group that posts to the Functions App
 resource "azurerm_monitor_action_group" "main" {
-  name                = "ag-funcapp-webhook"
+  name                = "ag-funcapp-webhook-${var.env_suffix}"
   resource_group_name = azurerm_resource_group.main.name
   short_name          = "funcag"
 
@@ -262,7 +262,7 @@ resource "azurerm_monitor_action_group" "main" {
 
 # 12. Log Search alert rule
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "main" {
-  name                = "qr-error"
+  name                = "qr-error-${var.env_suffix}"
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   scopes              = [azurerm_application_insights.main.id]
