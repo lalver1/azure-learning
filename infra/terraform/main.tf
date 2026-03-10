@@ -50,7 +50,7 @@ resource "azurerm_resource_group" "main" {
 # Initially created manually to hold the tfstate file
 # Import once before the first terraform apply
 resource "azurerm_storage_account" "main" {
-  name                          = "salalver1al-${var.env_suffix}"
+  name                          = "salalver1al${lower(var.env_suffix)}"
   resource_group_name           = azurerm_resource_group.main.name
   location                      = azurerm_resource_group.main.location
   account_tier                  = "Standard"
@@ -90,7 +90,7 @@ resource "azurerm_container_app_environment" "main" {
 
 # 4. Container App - Web
 resource "azurerm_container_app" "web" {
-  name                         = "aca-web-${var.env_suffix}"
+  name                         = "aca-web-${lower(var.env_suffix)}"
   container_app_environment_id = azurerm_container_app_environment.main.id
   resource_group_name          = azurerm_resource_group.main.name
   revision_mode                = "Single"
