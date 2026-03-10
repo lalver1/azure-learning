@@ -3,8 +3,19 @@ variable "container_tag" {
   type        = string
 }
 
+variable "subscription_id" {
+  description = "The subscription ID to use for the deployment."
+  type        = string
+}
+
 variable "enable_storage_firewall" {
   description = "Whether to enable the storage account firewall."
   type        = bool
   default     = false
+}
+
+variable "env_suffix" {
+  type        = string
+  description = "The environment suffix (e.g., test or prod)"
+  default     = "dev"
 }
