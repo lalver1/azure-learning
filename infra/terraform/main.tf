@@ -40,6 +40,7 @@ locals {
 # 1. Resource group
 # Initially created manually to hold the tfstate storage account
 # Import once before the first terraform apply
+# But later suffixed the name with the environment
 resource "azurerm_resource_group" "main" {
   name     = "rg-aca-web-${var.env_suffix}"
   location = "West US"
