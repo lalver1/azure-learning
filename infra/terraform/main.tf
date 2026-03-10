@@ -173,7 +173,7 @@ data "azurerm_key_vault_secret" "slack_webhook_url" {
 }
 
 # 9. A secure, random key for the Azure Functions' webhook URL
-resource "random_string" "function_key" {
+resource "random_password" "function_key" {
   length  = 32
   special = false
 }
