@@ -181,7 +181,7 @@ resource "random_password" "function_key" {
 
 # 10. Container App - Azure Functions
 resource "azurerm_container_app" "funcs" {
-  name                         = "aca-funcs-${var.env_suffix}"
+  name                         = "aca-funcs-${lower(var.env_suffix)}"
   container_app_environment_id = azurerm_container_app_environment.main.id
   resource_group_name          = azurerm_resource_group.main.name
   revision_mode                = "Single"
