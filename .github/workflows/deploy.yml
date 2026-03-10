@@ -8,6 +8,9 @@ on:
     tags:
       - "202[3-9].[0-9][0-9].[0-9]+-rc[0-9]+"
       - "202[3-9].[0-9][0-9].[0-9]+"
+    pull_request:
+    branches:
+      - main
 
 concurrency:
   group: ${{ github.ref_type != 'tag' && github.ref_name || contains(github.ref, '-rc') && 'test' || 'prod' }}
@@ -53,59 +56,15 @@ jobs:
             -d "scope=499b84ac-1321-427f-aa17-267ca6975798/.default" \
             "https://login.microsoftonline.com/${{ secrets.AZURE_ADO_TENANT_ID }}/oauth2/v2.0/token")
 
-          export AZURE_DEVOPS_EXT_PAT=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token // empty')
-
-          if [ -z "$AZURE_DEVOPS_EXT_PAT" ]; then
-            echo "Failed to get Azure DevOps token"
-            exit 1
-          fi
-
-        echo "Received ADO OAuth token"
-        # Dynamically build the JSON payload safely using jq
-        BODY_JSON=$(jq -n --arg ref "${{ github.ref }}" '{
-          resources: {
-            repositories: {
-              self: {
-                refName: $ref
-              }
-            }
-          }
-        }')
-        RESPONSE=$(az rest --method post \
-          --url "${{ secrets.AZURE_ADO_ORG_URL }}/${{ secrets.AZURE_ADO_PROJECT }}/_apis/pipelines/1/runs?api-version=6.0-preview.1" \
-          --body "$BODY_JSON" \
-          --resource "499b84ac-1321-427f-aa17-267ca6975798")
-
-        RUN_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
-
-        echo "Waiting for Azure DevOps Pipeline run to complete..."
-        while true; do
-          PIPELINE_STATUS=$(az pipelines runs show \
-            --id $RUN_ID \
-            --org "${{ secrets.AZURE_ADO_ORG_URL }}" \
-            --project "${{ secrets.AZURE_ADO_PROJECT }}" \
-            --query "status" -o tsv)
-
-          echo "Current pipeline status: $PIPELINE_STATUS"
-
-          if [[ "$PIPELINE_STATUS" == "completed" ]]; then
-            PIPELINE_RESULT=$(az pipelines runs show \
-              --id $RUN_ID \
-              --org "${{ secrets.AZURE_ADO_ORG_URL }}" \
-              --project "${{ secrets.AZURE_ADO_PROJECT }}" \
-              --query "result" -o tsv)
-
-            echo "Pipeline completed with result: $PIPELINE_RESULT"
-            if [[ "$PIPELINE_RESULT" == "succeeded" ]]; then
-              exit 0
-            else
-              echo "Azure DevOps Pipeline failed with result: $PIPELINE_RESULT"
-              exit 1
-            fi
-          elif [[ "$PIPELINE_STATUS" == "cancelling" || "$PIPELINE_STATUS" == "notStarted" || "$PIPELINE_STATUS" == "inProgress" ]]; then
-            sleep 10
-          else
-            echo "Azure DevOps Pipeline finished with unexpected status: $PIPELINE_STATUS"
-            exit 1
-          fi
-        done
+    - name: Terraform Plan
+      run: |
+        terraform plan \
+          -var "container_tag=4c223c07fb3f2bd45ce55a8af9ad6922af368ece" \
+          -var "subscription_id=${{ secrets.AZURE_MI_SUBSCRIPTION_ID }}" \
+          -var "env_suffix=${{ vars.RG }}" \
+          -out=tfplan
+    
+    - name: Terraform Apply
+      if: github.event_name != 'pull_request'
+      run: |
+        terraform apply -auto-approve tfplan
