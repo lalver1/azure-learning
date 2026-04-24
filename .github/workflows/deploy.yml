@@ -8,6 +8,9 @@ on:
     tags:
       - "202[3-9].[0-9][0-9].[0-9]+-rc[0-9]+"
       - "202[3-9].[0-9][0-9].[0-9]+"
+  pull_request:
+    branches:
+      - main
 
 concurrency:
   group: ${{ github.ref_type != 'tag' && github.ref_name || contains(github.ref, '-rc') && 'test' || 'prod' }}
@@ -20,8 +23,11 @@ permissions:
 jobs:
   create-infra:
     runs-on: ubuntu-latest
-    # Selects 'test' for -rc tags, 'prod' for regular tags, or branch name otherwise
-    environment: ${{ github.ref_type != 'tag' && github.ref_name || contains(github.ref, '-rc') && 'test' || 'prod' }}
+    # Selects 'test' for -rc tags, 'prod' for regular tags, 'preview' for PRs and 'main' otherwise
+    environment: >-
+      ${{ github.event_name == 'pull_request' && 'preview' || 
+          (github.ref_type != 'tag' && github.ref_name || 
+          (contains(github.ref, '-rc') && 'test' || 'prod')) }}
     
     defaults:
       run:
@@ -55,5 +61,6 @@ jobs:
           -out=tfplan
     
     - name: Terraform Apply
+      if: github.event_name != 'pull_request'
       run: |
         terraform apply -auto-approve tfplan
