@@ -65,6 +65,7 @@ jobs:
           --id "1" \
           --org "${{ secrets.AZURE_ADO_ORG_URL }}" \
           --project "${{ secrets.AZURE_ADO_PROJECT }}" \
+          --branch "${{ github.ref }}" \
           --commit-id ${{ github.sha }} \
           --query "id" -o tsv)
 
