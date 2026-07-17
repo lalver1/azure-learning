@@ -61,13 +61,22 @@ jobs:
           fi
 
         echo "Received ADO OAuth token"
-        RUN_ID=$(az pipelines run \
-          --id "1" \
-          --org "${{ secrets.AZURE_ADO_ORG_URL }}" \
-          --project "${{ secrets.AZURE_ADO_PROJECT }}" \
-          --branch "${{ github.ref }}" \
-          --commit-id ${{ github.sha }} \
-          --query "id" -o tsv)
+        # Dynamically build the JSON payload safely using jq
+        BODY_JSON=$(jq -n --arg ref "${{ github.ref }}" '{
+          resources: {
+            repositories: {
+              self: {
+                refName: $ref
+              }
+            }
+          }
+        }')
+        RESPONSE=$(az rest --method post \
+          --url "${{ secrets.AZURE_ADO_ORG_URL }}/${{ secrets.AZURE_ADO_PROJECT }}/_apis/pipelines/1/runs?api-version=6.0-preview.1" \
+          --body "$BODY_JSON" \
+          --resource "499b84ac-1321-427f-aa17-267ca6975798")
+
+        RUN_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
 
         echo "Waiting for Azure DevOps Pipeline run to complete..."
         while true; do
