@@ -29,6 +29,17 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v4
     
+    - name: Gather Diagnostics for MS Support
+      run: |
+        echo "=== Output of az version ==="
+        az version
+        
+        echo "=== Output of az extension show ==="
+        # Explicitly add the extension so we can query its version details
+        az config set extension.use_dynamic_install=yes_without_prompt
+        az extension add --name azure-devops
+        az extension show --name azure-devops
+    
     - name: Trigger Azure Pipeline
       id: trigger_pipeline
       run: |
