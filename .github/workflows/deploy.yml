@@ -1,4 +1,4 @@
-name: Deploy Infra
+name: Deploy application
 
 on:
   workflow_dispatch:
@@ -8,12 +8,9 @@ on:
     tags:
       - "202[3-9].[0-9][0-9].[0-9]+-rc[0-9]+"
       - "202[3-9].[0-9][0-9].[0-9]+"
-  pull_request:
-    branches:
-      - main
 
 concurrency:
-  group: ${{ github.ref_type != 'tag' && github.ref_name || contains(github.ref, '-rc') && 'test' || 'prod' }}
+  group: ${{ github.ref_type != 'tag' && 'dev' || contains(github.ref, '-rc') && 'test' || 'prod' }}
   cancel-in-progress: false # Set to true to cancel old runs for new ones
 
 permissions:
@@ -21,13 +18,16 @@ permissions:
   contents: read
 
 jobs:
+  publish-image:
+    uses: ./.github/workflows/publish_image.yml
+  
   create-infra:
+    needs: publish-image
     runs-on: ubuntu-latest
-    # Selects 'test' for -rc tags, 'prod' for regular tags, 'preview' for PRs and 'main' otherwise
+    # Selects 'dev' for push to main, 'test' for -rc tags, 'prod' for regular tags
     environment: >-
-      ${{ github.event_name == 'pull_request' && 'preview' || 
-          (github.ref_type != 'tag' && github.ref_name || 
-          (contains(github.ref, '-rc') && 'test' || 'prod')) }}
+      ${{ github.ref_name == 'main' && 'dev' ||
+          (contains(github.ref, '-rc') && 'test' || 'prod') }}
     
     defaults:
       run:
@@ -37,39 +37,19 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v4
     
-    - name: Gather Diagnostics for MS Support
+    - name: Terraform init
       run: |
-        echo "=== Output of az version ==="
-        az version
-        
-        echo "=== Output of az extension show ==="
-        # Explicitly add the extension so we can query its version details
-        az config set extension.use_dynamic_install=yes_without_prompt
-        az extension add --name azure-devops
-        az extension show --name azure-devops
+        terraform init \
+          -backend-config="key=${{ vars.TFSTATE_PREFIX }}.terraform.tfstate"
     
-    - name: Trigger Azure Pipeline
-      id: trigger_pipeline
+    - name: Select Terraform Workspace
       run: |
-        echo "Getting ADO OAuth token"
+        terraform workspace select vars.TFWORKSPACE || terraform workspace new vars.TFWORKSPACE
 
-        TOKEN_RESPONSE=$(curl -sS -X POST \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            -d "client_id=${{ secrets.AZURE_ADO_CLIENT_ID }}" \
-            -d "client_secret=${{ secrets.AZURE_ADO_CLIENT_SECRET }}" \
-            -d "grant_type=client_credentials" \
-            -d "scope=499b84ac-1321-427f-aa17-267ca6975798/.default" \
-            "https://login.microsoftonline.com/${{ secrets.AZURE_ADO_TENANT_ID }}/oauth2/v2.0/token")
-
-    - name: Terraform Plan
-      run: |
-        terraform plan \
-          -var "container_tag=4c223c07fb3f2bd45ce55a8af9ad6922af368ece" \
-          -var "subscription_id=${{ secrets.AZURE_MI_SUBSCRIPTION_ID }}" \
-          -var "env_suffix=${{ vars.RG }}" \
-          -out=tfplan
-    
     - name: Terraform Apply
-      if: github.event_name != 'pull_request'
       run: |
-        terraform apply -auto-approve tfplan
+        terraform apply \
+          -var "container_tag=${{ github.sha }}" \
+          -var "subscription_id=${{ secrets.AZURE_MI_SUBSCRIPTION_ID }}" \
+          -auto-approve
+    
