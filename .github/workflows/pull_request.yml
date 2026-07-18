@@ -1,0 +1,45 @@
+name: Pull Request checks
+
+on:
+  pull_request:
+
+# Federated Identity credentials
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  pr-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@v4
+    
+    - name: Log in to Azure using Federated Identity Credentials
+      uses: azure/login@v2
+      with:
+        client-id: ${{ secrets.AZURE_MI_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_MI_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_MI_SUBSCRIPTION_ID }}
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Terraform Init
+      run: |
+        terraform init \
+          -backend-config="key=dev.terraform.tfstate"
+
+    - name: Select Terraform Workspace
+      run: |
+        terraform workspace select dev || terraform workspace new dev
+
+    - name: Terraform Plan
+      run: |
+        terraform plan \
+          -var "container_tag=${{ github.sha }}" \
+          -var "subscription_id=${{ secrets.AZURE_MI_SUBSCRIPTION_ID }}" \
