@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Usage: ./bootstrap_terraform_backend.sh <resource group> <storage_account_name> <blob_container_name>
+# Usage: ./bootstrap_terraform_backend.sh <resource group> <storage_account_name> <is_storage_account_firewalled> <blob_container_name>
 # Example: ./deploy.sh myResourceGroup mytfstateaccount mycontainer
 
 set -euo pipefail
