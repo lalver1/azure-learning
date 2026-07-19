@@ -1,4 +1,4 @@
-name: Deploy Infra
+name: Deploy application
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
       - "202[3-9].[0-9][0-9].[0-9]+"
 
 concurrency:
-  group: ${{ github.ref_type != 'tag' && github.ref_name || contains(github.ref, '-rc') && 'test' || 'prod' }}
+  group: ${{ github.ref_type != 'tag' && 'dev' || contains(github.ref, '-rc') && 'test' || 'prod' }}
   cancel-in-progress: false # Set to true to cancel old runs for new ones
 
 permissions:
@@ -18,8 +18,16 @@ permissions:
   contents: read
 
 jobs:
+  publish-image:
+    uses: ./.github/workflows/publish_image.yml
+  
   create-infra:
+    needs: publish-image
     runs-on: ubuntu-latest
+    # Selects 'dev' for push to main, 'test' for -rc tags, 'prod' for regular tags
+    environment: >-
+      ${{ github.ref_name == 'main' && 'dev' ||
+          (contains(github.ref, '-rc') && 'test' || 'prod') }}
     
     defaults:
       run:
@@ -29,83 +37,19 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v4
     
-    - name: Gather Diagnostics for MS Support
+    - name: Terraform init
       run: |
-        echo "=== Output of az version ==="
-        az version
-        
-        echo "=== Output of az extension show ==="
-        # Explicitly add the extension so we can query its version details
-        az config set extension.use_dynamic_install=yes_without_prompt
-        az extension add --name azure-devops
-        az extension show --name azure-devops
+        terraform init \
+          -backend-config="key=${{ vars.TFSTATE_PREFIX }}.terraform.tfstate"
     
-    - name: Trigger Azure Pipeline
-      id: trigger_pipeline
+    - name: Select Terraform Workspace
       run: |
-        echo "Getting ADO OAuth token"
+        terraform workspace select vars.TFWORKSPACE || terraform workspace new vars.TFWORKSPACE
 
-        TOKEN_RESPONSE=$(curl -sS -X POST \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            -d "client_id=${{ secrets.AZURE_ADO_CLIENT_ID }}" \
-            -d "client_secret=${{ secrets.AZURE_ADO_CLIENT_SECRET }}" \
-            -d "grant_type=client_credentials" \
-            -d "scope=499b84ac-1321-427f-aa17-267ca6975798/.default" \
-            "https://login.microsoftonline.com/${{ secrets.AZURE_ADO_TENANT_ID }}/oauth2/v2.0/token")
-
-          export AZURE_DEVOPS_EXT_PAT=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token // empty')
-
-          if [ -z "$AZURE_DEVOPS_EXT_PAT" ]; then
-            echo "Failed to get Azure DevOps token"
-            exit 1
-          fi
-
-        echo "Received ADO OAuth token"
-        # Dynamically build the JSON payload safely using jq
-        BODY_JSON=$(jq -n --arg ref "${{ github.ref }}" '{
-          resources: {
-            repositories: {
-              self: {
-                refName: $ref
-              }
-            }
-          }
-        }')
-        RESPONSE=$(az rest --method post \
-          --url "${{ secrets.AZURE_ADO_ORG_URL }}/${{ secrets.AZURE_ADO_PROJECT }}/_apis/pipelines/1/runs?api-version=6.0-preview.1" \
-          --body "$BODY_JSON" \
-          --resource "499b84ac-1321-427f-aa17-267ca6975798")
-
-        RUN_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
-
-        echo "Waiting for Azure DevOps Pipeline run to complete..."
-        while true; do
-          PIPELINE_STATUS=$(az pipelines runs show \
-            --id $RUN_ID \
-            --org "${{ secrets.AZURE_ADO_ORG_URL }}" \
-            --project "${{ secrets.AZURE_ADO_PROJECT }}" \
-            --query "status" -o tsv)
-
-          echo "Current pipeline status: $PIPELINE_STATUS"
-
-          if [[ "$PIPELINE_STATUS" == "completed" ]]; then
-            PIPELINE_RESULT=$(az pipelines runs show \
-              --id $RUN_ID \
-              --org "${{ secrets.AZURE_ADO_ORG_URL }}" \
-              --project "${{ secrets.AZURE_ADO_PROJECT }}" \
-              --query "result" -o tsv)
-
-            echo "Pipeline completed with result: $PIPELINE_RESULT"
-            if [[ "$PIPELINE_RESULT" == "succeeded" ]]; then
-              exit 0
-            else
-              echo "Azure DevOps Pipeline failed with result: $PIPELINE_RESULT"
-              exit 1
-            fi
-          elif [[ "$PIPELINE_STATUS" == "cancelling" || "$PIPELINE_STATUS" == "notStarted" || "$PIPELINE_STATUS" == "inProgress" ]]; then
-            sleep 10
-          else
-            echo "Azure DevOps Pipeline finished with unexpected status: $PIPELINE_STATUS"
-            exit 1
-          fi
-        done
+    - name: Terraform Apply
+      run: |
+        terraform apply \
+          -var "container_tag=${{ github.sha }}" \
+          -var "subscription_id=${{ secrets.AZURE_MI_SUBSCRIPTION_ID }}" \
+          -auto-approve
+    

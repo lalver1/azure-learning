@@ -4,10 +4,6 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.5"
-    }
   }
   backend "azurerm" {
     resource_group_name  = "rg-aca-web"
@@ -25,23 +21,20 @@ provider "azurerm" {
 # Get information about the current Azure client (logged-in identity)
 data "azurerm_client_config" "current" {}
 
-# 0. local variables
 locals {
-  custom_domain_name         = "example.com"
-  flag                       = 0
-  is_flag                    = local.flag == 1
-  sender_domain              = local.is_flag ? azurerm_email_communication_service_domain.custom[0].mail_from_sender_domain : azurerm_email_communication_service_domain.azure_managed[0].mail_from_sender_domain
-  sender_email               = "DoNotReply@${local.sender_domain}"
-  data_location              = "United States"
-  email_service_name         = "EmailCommServices"
-  communication_service_name = "GeneralCommServices"
+  is_prod    = terraform.workspace == "default"
+  is_test    = terraform.workspace == "test"
+  is_dev     = !(local.is_prod || local.is_test)
+  env_name   = local.is_prod ? "prod" : terraform.workspace
+  env_letter = upper(substr(local.env_name, 0, 1))
 }
 
 # 1. Resource group
 # Initially created manually to hold the tfstate storage account
 # Import once before the first terraform apply
+# But later suffixed the name with the environment
 resource "azurerm_resource_group" "main" {
-  name     = "rg-aca-web-${var.env_suffix}"
+  name     = "rg-aca-web-${local.env_letter}"
   location = "West US"
 }
 
@@ -49,7 +42,7 @@ resource "azurerm_resource_group" "main" {
 # Initially created manually to hold the tfstate file
 # Import once before the first terraform apply
 resource "azurerm_storage_account" "main" {
-  name                          = "salalver1al"
+  name                          = "salalver1al${lower(local.env_letter)}"
   resource_group_name           = azurerm_resource_group.main.name
   location                      = azurerm_resource_group.main.location
   account_tier                  = "Standard"
@@ -82,14 +75,14 @@ resource "azurerm_storage_account" "main" {
 
 # 3. Container App Environment
 resource "azurerm_container_app_environment" "main" {
-  name                = "web-aca-env"
+  name                = "web-aca-env-${local.env_letter}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
 }
 
 # 4. Container App - Web
 resource "azurerm_container_app" "web" {
-  name                         = "aca-web"
+  name                         = "aca-web-${lower(local.env_letter)}"
   container_app_environment_id = azurerm_container_app_environment.main.id
   resource_group_name          = azurerm_resource_group.main.name
   revision_mode                = "Single"
@@ -121,7 +114,7 @@ resource "azurerm_container_app" "web" {
 
 # 5. Log Analytics Workspace (needed for App Insights)
 resource "azurerm_log_analytics_workspace" "main" {
-  name                = "law-web"
+  name                = "law-web-${local.env_letter}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   sku                 = "PerGB2018"
@@ -130,7 +123,7 @@ resource "azurerm_log_analytics_workspace" "main" {
 
 # 6. Application Insights
 resource "azurerm_application_insights" "main" {
-  name                = "appi-web"
+  name                = "appi-web-${local.env_letter}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   application_type    = "web"
@@ -139,7 +132,7 @@ resource "azurerm_application_insights" "main" {
 
 # 7. Key Vault
 resource "azurerm_key_vault" "main" {
-  name                = "kv-al"
+  name                = "kv-al-${local.env_letter}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   tenant_id           = data.azurerm_client_config.current.tenant_id
@@ -163,232 +156,5 @@ resource "azurerm_key_vault" "main" {
     key_permissions = [
       "Get", "List", "Create", "Delete", "Purge", "Recover", "Backup", "Restore"
     ]
-  }
-}
-
-# 8. Key Vault Secret
-data "azurerm_key_vault_secret" "slack_webhook_url" {
-  name         = "slack-webhook-url"
-  key_vault_id = azurerm_key_vault.main.id
-}
-
-# 9. A secure, random key for the Azure Functions' webhook URL
-resource "random_password" "function_key" {
-  length  = 32
-  special = false
-}
-
-# 10. Container App - Azure Functions
-resource "azurerm_container_app" "funcs" {
-  name                         = "aca-funcs"
-  container_app_environment_id = azurerm_container_app_environment.main.id
-  resource_group_name          = azurerm_resource_group.main.name
-  revision_mode                = "Single"
-
-  # Securely store secrets that will be injected as environment variables
-  secret {
-    name  = "slack-webhook-url-secret"
-    value = data.azurerm_key_vault_secret.slack_webhook_url.value
-  }
-  secret {
-    name  = "function-key-secret"
-    value = random_password.function_key.result
-  }
-  secret {
-    name  = "appinsights-api-key-secret"
-    value = azurerm_application_insights_api_key.main.api_key
-  }
-
-  template {
-    container {
-      name   = "functions"
-      image  = "ghcr.io/lalver1/azure-functions:${var.container_tag}"
-      cpu    = 0.25
-      memory = "0.5Gi"
-
-      env {
-        name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
-        value = azurerm_application_insights.main.connection_string
-      }
-      env {
-        name  = "AzureWebJobsStorage"
-        value = azurerm_storage_account.main.primary_connection_string
-      }
-      env {
-        name        = "SLACK_WEBHOOK_URL"
-        secret_name = "slack-webhook-url-secret"
-      }
-      env {
-        name        = "AZURE_FUNCTION_KEY"
-        secret_name = "function-key-secret"
-      }
-      env {
-        name        = "APPINSIGHTS_API_KEY"
-        secret_name = "appinsights-api-key-secret"
-      }
-    }
-
-    min_replicas = 1
-    max_replicas = 1
-  }
-
-  ingress {
-    external_enabled = true
-    target_port      = 80
-    transport        = "auto"
-
-    traffic_weight {
-      percentage      = 100
-      latest_revision = true
-    }
-  }
-
-  identity {
-    type = "SystemAssigned"
-  }
-}
-
-# 11. Action Group that posts to the Functions App
-resource "azurerm_monitor_action_group" "main" {
-  name                = "ag-funcapp-webhook"
-  resource_group_name = azurerm_resource_group.main.name
-  short_name          = "funcag"
-
-  webhook_receiver {
-    name        = "funcapp-webhook"
-    service_uri = "https://${azurerm_container_app.funcs.ingress[0].fqdn}/api/alert_to_slack?code=${random_password.function_key.result}"
-  }
-}
-
-# 12. Log Search alert rule
-resource "azurerm_monitor_scheduled_query_rules_alert_v2" "main" {
-  name                = "qr-error"
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-  scopes              = [azurerm_application_insights.main.id]
-
-  description  = "Alerts when any exception is logged in Application Insights."
-  display_name = "Web Flask App Error Alert"
-  enabled      = true
-  severity     = 2
-
-  evaluation_frequency = "PT5M"
-  window_duration      = "PT5M"
-
-  criteria {
-    query                   = <<-QUERY
-      union (exceptions | where type !has "ServiceResponseError"), (traces | where severityLevel >= 3)
-    QUERY
-    operator                = "GreaterThan"
-    threshold               = 0
-    time_aggregation_method = "Count"
-
-    failing_periods {
-      minimum_failing_periods_to_trigger_alert = 1
-      number_of_evaluation_periods             = 1
-    }
-  }
-
-  action {
-    action_groups = [azurerm_monitor_action_group.main.id]
-    custom_properties = {
-      subject = "🚨 Application Error"
-    }
-  }
-
-  lifecycle {
-    ignore_changes = [tags]
-  }
-}
-
-# 13. Create an API key for querying Application Insights data
-resource "azurerm_application_insights_api_key" "main" {
-  name                    = "api-query-key-funcs"
-  application_insights_id = azurerm_application_insights.main.id
-
-  read_permissions = [
-    "search",
-  ]
-}
-
-# 14. Communication Services
-
-resource "azurerm_communication_service" "main" {
-  name                = local.communication_service_name
-  resource_group_name = azurerm_resource_group.main.name
-  data_location       = local.data_location
-
-  lifecycle {
-    ignore_changes = [tags]
-  }
-}
-
-resource "azurerm_email_communication_service" "main" {
-  name                = local.email_service_name
-  resource_group_name = azurerm_resource_group.main.name
-  data_location       = local.data_location
-
-  lifecycle {
-    ignore_changes = [tags]
-  }
-}
-
-resource "azurerm_email_communication_service_domain" "azure_managed" {
-  count = local.is_flag ? 0 : 1
-
-  # when domain_management="AzureManaged",
-  # the name has to be "AzureManagedDomain"
-  # https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/email_communication_service_domain#name-19
-  name                             = "AzureManagedDomain"
-  email_service_id                 = azurerm_email_communication_service.main.id
-  domain_management                = "AzureManaged"
-  user_engagement_tracking_enabled = true
-
-  lifecycle {
-    ignore_changes = [tags]
-  }
-}
-
-resource "azurerm_communication_service_email_domain_association" "azure_managed" {
-  count = local.is_flag ? 0 : 1
-
-  communication_service_id = azurerm_communication_service.main.id
-  email_service_domain_id  = azurerm_email_communication_service_domain.azure_managed[0].id
-}
-
-# This domain is only created when local.is_flag is true.
-resource "azurerm_email_communication_service_domain" "custom" {
-  count = local.is_flag ? 1 : 0
-
-  name                             = local.custom_domain_name
-  email_service_id                 = azurerm_email_communication_service.main.id
-  domain_management                = "CustomerManaged"
-  user_engagement_tracking_enabled = true
-
-  lifecycle {
-    ignore_changes = [tags]
-  }
-}
-
-resource "azurerm_communication_service_email_domain_association" "custom" {
-  count = local.is_flag ? 1 : 0
-
-  communication_service_id = azurerm_communication_service.main.id
-  email_service_domain_id  = azurerm_email_communication_service_domain.custom[0].id
-}
-
-resource "azurerm_log_analytics_saved_search" "app_traces_query" {
-  name                       = "HighSeverityAppErrors"
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
-  display_name               = "High Severity App Errors"
-  category                   = "My Application Insights Queries"
-
-  # The KQL query uses the AppTraces table stored in the LAW
-  query = <<-QUERY
-    AppTraces
-  QUERY
-
-  lifecycle {
-    ignore_changes = [tags]
   }
 }

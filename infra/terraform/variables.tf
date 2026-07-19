@@ -13,9 +13,3 @@ variable "enable_storage_firewall" {
   type        = bool
   default     = false
 }
-
-variable "env_suffix" {
-  type        = string
-  description = "The environment suffix (e.g., test or prod)"
-  default     = "dev"
-}
