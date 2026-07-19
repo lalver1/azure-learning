@@ -39,6 +39,9 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v4
     
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v3
+
     - name: Terraform init
       run: |
         terraform init \
