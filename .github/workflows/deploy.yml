@@ -56,7 +56,7 @@ jobs:
     
     - name: Select Terraform Workspace
       run: |
-        terraform workspace select vars.TFWORKSPACE || terraform workspace new vars.TFWORKSPACE
+        terraform workspace select ${{ vars.TFWORKSPACE }} || terraform workspace new ${{ vars.TFWORKSPACE }}
 
     - name: Terraform Apply
       run: |
